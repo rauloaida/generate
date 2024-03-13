@@ -11,8 +11,7 @@ app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 
 # Load your model (consider doing this outside of your request handling to save time)
-local_model_dir = "./sdxl-turbo"
-pipe = DiffusionPipeline.from_pretrained(local_model_dir).to("cpu")
+pipeline = DiffusionPipeline.from_pretrained("stabilityai/sdxl-turbo").to("cpu")
 
 class ImagePrompt(BaseModel):
     prompt: str
