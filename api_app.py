@@ -11,7 +11,7 @@ app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 
 # Load your model (consider doing this outside of your request handling to save time)
-pipeline = DiffusionPipeline.from_pretrained("stabilityai/sdxl-turbo").to("cpu")
+pipe = DiffusionPipeline.from_pretrained("stabilityai/sdxl-turbo").to("cpu")
 
 class ImagePrompt(BaseModel):
     prompt: str
@@ -23,7 +23,7 @@ async def generate_image(image_prompt: ImagePrompt):
         # Generate the image with the provided prompt
         results = pipe(
             prompt=image_prompt.prompt,
-            num_inference_steps=5,
+            num_inference_steps=2,
             guidance_scale=0.0,
         )
         img = results.images[0]
