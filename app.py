@@ -28,5 +28,5 @@ while True:
     safe_prompt = "".join(char for char in prompt if char.isalnum() or char in " -_")
     filename = f"image_{safe_prompt}.png"
     img.save(filename)
-
+    # test comment
     print(f"Image saved as '{filename}'")
