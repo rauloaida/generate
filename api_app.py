@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse
 from diffusers import DiffusionPipeline
 from pydantic import BaseModel
 import io
@@ -39,3 +39,8 @@ async def generate_image(image_prompt: ImagePrompt):
     except Exception as e:
         logging.error(f"Error during image generation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/health")
+async def health_check():
+    return PlainTextResponse("OK", status_code=200)
