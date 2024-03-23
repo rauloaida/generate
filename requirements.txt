@@ -10,4 +10,5 @@ accelerate==0.24.0
 compel==2.0.2
 controlnet-aux==0.0.7
 peft==0.6.0
+xformers
 hf_transfer
