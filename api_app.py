@@ -1,76 +1,59 @@
 from fastapi import FastAPI, HTTPException, Form
-from fastapi.responses import StreamingResponse, PlainTextResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 from diffusers import AutoPipelineForText2Image
 import torch
 import io
-import logging
-import time
+import aioredis  # Ensure correct import for async Redis operations
+import uuid 
 
 app = FastAPI()
 
-# Set up basic logging
-logging.basicConfig(level=logging.INFO)
+# Setup for the Diffusers pipeline
+MODEL_ID = "stabilityai/sdxl-turbo"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+PIPELINE = AutoPipelineForText2Image.from_pretrained(
+    MODEL_ID,
+    torch_dtype=torch.float32 if DEVICE == "cpu" else torch.float16
+).to(DEVICE)
 
-# Global list to store the last three image generation times
-image_generation_times = []
+REDIS_URL = "redis://localhost:6379"
 
-# Environment setup and model loading
-mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-device_type = "cuda" if torch.cuda.is_available() else "mps" if mps_available else "cpu"
-torch_dtype = torch.float16 if device_type == "cuda" else torch.float32
+@app.on_event("startup")
+async def startup_event():
+    global redis
+    # Use aioredis.create_redis_pool for aioredis versions <2.0
+    # For aioredis versions >=2.0, from_url is used directly to create a Redis connection
+    redis = await aioredis.from_url(REDIS_URL, decode_responses=False)
 
-# Log the device being used
-logging.info(f"Using {device_type} for acceleration")
-
-# Define device based on the type
-device = torch.device(device_type)
-
-# Load text-to-image model without the need for an HF token
-# Make sure to define and initialize t2i_pipe here
-t2i_pipe = AutoPipelineForText2Image.from_pretrained(
-    "stabilityai/sdxl-turbo",
-    safety_checker=None,
-    torch_dtype=torch_dtype
-).to(device)
+@app.on_event("shutdown")
+async def shutdown_event():
+    await redis.close()
 
 @app.post("/generate-image/")
-async def generate_image(prompt: str = Form(...), num_inference_steps: int = Form(2), guidance_scale: float = Form(0.0)):
-    global image_generation_times
-    logging.info(f"Received prompt: {prompt}")
-    start_time = time.time()
-
-    # Text to image generation
-    results = t2i_pipe(
-        prompt=prompt,
-        num_inference_steps=num_inference_steps,
-        guidance_scale=guidance_scale,
-    )
+async def api_generate_image(prompt: str = Form(...)):
+    request_id = str(uuid.uuid4()) # Hardcoded request ID for debugging
+    await redis.hset("status", request_id, "pending")
+    
+    # Run image generation synchronously
+    results = PIPELINE(prompt=prompt, num_inference_steps=2, guidance_scale=0.0)
     img = results.images[0]
-
-    generation_duration = time.time() - start_time
-    logging.info(f"Image generation duration: {generation_duration:.2f} seconds")
-
-    # Store the generation duration, keeping only the last three records
-    image_generation_times.append(generation_duration)
-    image_generation_times = image_generation_times[-3:]
-
-    # Convert the PIL image to a byte stream for response
     img_byte_arr = io.BytesIO()
     img.save(img_byte_arr, format='PNG')
-    img_byte_arr.seek(0)
+    
+    # Store the image data in Redis
+    await redis.set(f"image_{request_id}", img_byte_arr.getvalue())
+    
+    # Update the status to done
+    await redis.hset("status", request_id, "done")
 
-    logging.info("Image generation successful")
-    return StreamingResponse(img_byte_arr, media_type="image/png")
+    return {"request_id": request_id}
 
-@app.get("/health")
-async def health_check():
-    return PlainTextResponse("OK", status_code=200)
+@app.get("/get-image/{request_id}")
+async def get_image(request_id: str):
+    image_data = await redis.get(f"image_{request_id}")
 
-@app.get("/hardware")
-async def hardware_check():
-    return PlainTextResponse(device_type, status_code=200)
+    if image_data:
+        return StreamingResponse(io.BytesIO(image_data), media_type="image/png")
+    else:
+        raise HTTPException(status_code=404, detail="Request ID not found")
 
-@app.get("/timing")
-async def timing():
-    # Return the last three image generation times
-    return JSONResponse(content={"last_three_generation_times": image_generation_times})
